@@ -80,7 +80,7 @@ public:
         rightFrame.src_frame_id = rf.find("rootFrame").asString();
         
         cfg.put("device", "JoypadControlClient");
-        cfg.put("local", "/framecontroller");
+        cfg.put("local", "/framecontroller/joypad-client");
         cfg.put("remote", rf.find("remote").asString());
 
         if (!joypadPD.open(cfg))
@@ -90,6 +90,7 @@ public:
 
         cfg.put("device", "transformClient");
         cfg.put("remote", "/transformServer");
+        cfg.put("local", "/framecontroller/transform-client");
         
         if (!tfPD.open(cfg))
         {
