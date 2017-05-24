@@ -39,8 +39,7 @@ public:
     FrameTransform     rightFrame;
     Matrix             leftInitM;
     Matrix             rightInitM;
-    double             L_homePos[3];
-    double             R_homePos[3];
+    double             limit[3]; /* Min and max limits for the frame position (w.r.t. to the initial position, default +inf )*/
     ParamParser        param{"framecontroller"};
 
     FrameController() {}
@@ -70,7 +69,6 @@ public:
         if (!param.parse(rf,  "leftFrame",         ParamParser::TYPE_STRING)) return false;
         if (!param.parse(rf,  "rightFrame",        ParamParser::TYPE_STRING)) return false;
         if (!param.parse(rf,  "remote",            ParamParser::TYPE_STRING)) return false;
-        //param.parse(rf, "rightFrame",      ParamParser::TYPE_LIST);
 
         maxVelocity             = rf.find("velocity").asDouble();
         velocity                = maxVelocity * rate;
@@ -78,6 +76,18 @@ public:
         leftFrame.src_frame_id  = rf.find("rootFrame").asString();
         rightFrame.dst_frame_id = rf.find("rightFrame").asString();
         rightFrame.src_frame_id = rf.find("rootFrame").asString();
+
+        if (param.parse(rf,  "limit", ParamParser::TYPE_DOUBLE))
+        {
+            double limitScalar = rf.find("limit").asDouble();
+            limit[0] = limit[1] = limit[2] = limitScalar;
+        }
+        else
+        {
+            limit[0] = limit[1] = limit[2] = 1e12;
+        }
+
+
         
         cfg.put("device", "JoypadControlClient");
         cfg.put("local", "/framecontroller/joypad-client");
@@ -148,6 +158,22 @@ public:
             v = 0;
         }
     }
+
+    double hardlimiter(double v, double max, double min)
+    {
+        if (v < min)
+        {
+            return min;
+        }
+
+        if (v > max)
+        {
+            return max;
+        }
+
+        return v;
+    }
+
     virtual bool   updateModule() override
     {
         size_t i;
@@ -182,8 +208,15 @@ public:
             sticks[i][1] = -sticks[i][1];
         }
 
-        leftFrame.translation.set( leftFrame.translation.tX  + axisVector[1] * velocity, leftFrame.translation.tY  + -sticks[1][0] *velocity,  leftFrame.translation.tZ  + sticks[1][1] * velocity);
-        rightFrame.translation.set(rightFrame.translation.tX + axisVector[0] * velocity, rightFrame.translation.tY + -sticks[0][0] * velocity, rightFrame.translation.tZ + sticks[0][1] * velocity);
+        yarp::sig::Vector lHome = leftInitM.subcol(0, 3, 3);
+        yarp::sig::Vector rHome = rightInitM.subcol(0, 3, 3);
+
+        leftFrame.translation.set( hardlimiter(leftFrame.translation.tX  + axisVector[1] * velocity, lHome[0] + limit[0], lHome[0] - limit[0]),
+                                   hardlimiter(leftFrame.translation.tY  + -sticks[1][0] * velocity, lHome[1] + limit[1], lHome[1] - limit[1]),
+                                   hardlimiter(leftFrame.translation.tZ  +  sticks[1][1] * velocity, lHome[2] + limit[2], lHome[2] - limit[2]));
+        rightFrame.translation.set( hardlimiter(rightFrame.translation.tX + axisVector[0] * velocity, rHome[0] + limit[0], rHome[0] - limit[0]),
+                                    hardlimiter(rightFrame.translation.tY + -sticks[0][0] * velocity, rHome[1] + limit[1], rHome[1] - limit[1]),
+                                    hardlimiter(rightFrame.translation.tZ + sticks[0][1] * velocity,  rHome[2] + limit[2], rHome[2] - limit[2]));
         tfPublisher->setTransform(leftFrame.dst_frame_id, leftFrame.src_frame_id, leftFrame.toMatrix());
         tfPublisher->setTransform(rightFrame.dst_frame_id, rightFrame.src_frame_id, rightFrame.toMatrix());
         return true;
