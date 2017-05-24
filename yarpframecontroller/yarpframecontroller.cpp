@@ -23,7 +23,6 @@ constexpr double rate        = 0.01;
 class FrameController : public RFModule
 {
 public:
-    bool               useInternalTfServer;
     PolyDriver         joypadPD;
     PolyDriver         tfPD;
     IFrameTransform*   tfPublisher;
@@ -41,6 +40,7 @@ public:
     Matrix             rightInitM;
     double             limit[3]; /* Min and max limits for the frame position (w.r.t. to the initial position, default +inf )*/
     ParamParser        param{"framecontroller"};
+    bool               invertPOV;
 
     FrameController() {}
     virtual double getPeriod() override { return rate; }
@@ -62,13 +62,14 @@ public:
         unsigned int count;
         Property     cfg;
         Bottle       b;
-        if (!param.parse(rf,  "velocity",          ParamParser::TYPE_DOUBLE)) return false;
-        if (!param.parse(rf,  "rootFrame",         ParamParser::TYPE_STRING)) return false;
-        if (!param.parse(rf,  "leftFrameInitial",  ParamParser::TYPE_STRING)) return false;
-        if (!param.parse(rf,  "rightFrameInitial", ParamParser::TYPE_STRING)) return false;
-        if (!param.parse(rf,  "leftFrame",         ParamParser::TYPE_STRING)) return false;
-        if (!param.parse(rf,  "rightFrame",        ParamParser::TYPE_STRING)) return false;
-        if (!param.parse(rf,  "remote",            ParamParser::TYPE_STRING)) return false;
+        if (!param.parse(rf, "velocity",          ParamParser::TYPE_DOUBLE)) return false;
+        if (!param.parse(rf, "rootFrame",         ParamParser::TYPE_STRING)) return false;
+        if (!param.parse(rf, "leftFrameInitial",  ParamParser::TYPE_STRING)) return false;
+        if (!param.parse(rf, "rightFrameInitial", ParamParser::TYPE_STRING)) return false;
+        if (!param.parse(rf, "leftFrame",         ParamParser::TYPE_STRING)) return false;
+        if (!param.parse(rf, "rightFrame",        ParamParser::TYPE_STRING)) return false;
+        if (!param.parse(rf, "remote",            ParamParser::TYPE_STRING)) return false;
+        if (!param.parse(rf, "invertPOV",         ParamParser::TYPE_BOOL  )) return false;
 
         maxVelocity             = rf.find("velocity").asDouble();
         velocity                = maxVelocity * rate;
@@ -76,6 +77,7 @@ public:
         leftFrame.src_frame_id  = rf.find("rootFrame").asString();
         rightFrame.dst_frame_id = rf.find("rightFrame").asString();
         rightFrame.src_frame_id = rf.find("rootFrame").asString();
+        invertPOV = rf.find("invertPOV").asBool();
 
         if (param.parse(rf,  "limit", ParamParser::TYPE_DOUBLE))
         {
@@ -176,7 +178,10 @@ public:
 
     virtual bool   updateModule() override
     {
-        size_t i;
+        size_t      i;
+        static char assigned_to_left  = 1 - invertPOV;
+        static char assigned_to_right = 0 + invertPOV;
+        static char povDirection      = invertPOV * 2 - 1;
         for (i = 0; i < buttonCount; ++i)
         {
             joypad->getButton(i, buttonVector[i]);
@@ -211,12 +216,12 @@ public:
         yarp::sig::Vector lHome = leftInitM.subcol(0, 3, 3);
         yarp::sig::Vector rHome = rightInitM.subcol(0, 3, 3);
 
-        leftFrame.translation.set( hardlimiter(leftFrame.translation.tX  + axisVector[1] * velocity, lHome[0] + limit[0], lHome[0] - limit[0]),
-                                   hardlimiter(leftFrame.translation.tY  + -sticks[1][0] * velocity, lHome[1] + limit[1], lHome[1] - limit[1]),
-                                   hardlimiter(leftFrame.translation.tZ  +  sticks[1][1] * velocity, lHome[2] + limit[2], lHome[2] - limit[2]));
-        rightFrame.translation.set( hardlimiter(rightFrame.translation.tX + axisVector[0] * velocity, rHome[0] + limit[0], rHome[0] - limit[0]),
-                                    hardlimiter(rightFrame.translation.tY + -sticks[0][0] * velocity, rHome[1] + limit[1], rHome[1] - limit[1]),
-                                    hardlimiter(rightFrame.translation.tZ + sticks[0][1] * velocity,  rHome[2] + limit[2], rHome[2] - limit[2]));
+        leftFrame.translation.set( hardlimiter(leftFrame.translation.tX  + axisVector[assigned_to_left] * velocity, lHome[0] + limit[0], lHome[0] - limit[0]),
+                                   hardlimiter(leftFrame.translation.tY  + povDirection * sticks[assigned_to_left][0] * velocity, lHome[1] + limit[1], lHome[1] - limit[1]),
+                                   hardlimiter(leftFrame.translation.tZ  + sticks[assigned_to_left][1] * velocity, lHome[2] + limit[2], lHome[2] - limit[2]));
+        rightFrame.translation.set( hardlimiter(rightFrame.translation.tX + axisVector[assigned_to_right] * velocity, rHome[0] + limit[0], rHome[0] - limit[0]),
+                                    hardlimiter(rightFrame.translation.tY + povDirection * sticks[assigned_to_right][0] * velocity, rHome[1] + limit[1], rHome[1] - limit[1]),
+                                    hardlimiter(rightFrame.translation.tZ + sticks[assigned_to_right][1] * velocity, rHome[2] + limit[2], rHome[2] - limit[2]));
         tfPublisher->setTransform(leftFrame.dst_frame_id, leftFrame.src_frame_id, leftFrame.toMatrix());
         tfPublisher->setTransform(rightFrame.dst_frame_id, rightFrame.src_frame_id, rightFrame.toMatrix());
         return true;
